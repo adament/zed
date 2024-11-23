@@ -10,10 +10,44 @@ pub fn remote_server_dir_relative() -> &'static Path {
     Path::new(".zed_server")
 }
 
+pub fn portable_dir() -> &'static Option<PathBuf> {
+    static PORTABLE_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
+    PORTABLE_DIR.get_or_init(|| {
+        // I can imagine a couple of different options for portable mode
+        // configuration:
+        //
+        // 1. Make portable mode a pure compile time flag such that if Zed is
+        //    compiled in portable mode it will only run in portable mode.
+        // 2. VS Code like behaviour where the presence of data directory next
+        //    to the executable activates portable mode.
+        //
+        //    This has the benefit that the portable mode can be activated without
+        //    any configuration but the configuration easily becomes brittle since
+        //    we must:
+        //    * Detemine the correct path of the current executable, including if
+        //      it is an application bundle on MacOS
+        //    * Reliably test whether the data folder exists with the correct
+        //      permissions
+        // 3. Use an environment variable, this is simple, robust and the user expresses clear intent.
+        //
+        //    The drawback is that the user must set the environment variable
+        //    before starting Zed, which means some kind of shim is needed for the
+        //    case where one keeps their portable setup on a USB stick and all
+        //    logic resides on the USB stick.
+        match std::env::var_os("ZED_PORTABLE_DIR") {
+            Some(portable_dir) => Some(PathBuf::from(portable_dir)),
+            None => None
+        }
+    })
+}
+
 /// Returns the path to the configuration directory used by Zed.
 pub fn config_dir() -> &'static PathBuf {
     static CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
     CONFIG_DIR.get_or_init(|| {
+        if let Some(portable_dir) = portable_dir() {
+            return portable_dir.join("config");
+        }
         if cfg!(target_os = "windows") {
             return dirs::config_dir()
                 .expect("failed to determine RoamingAppData directory")
@@ -37,6 +71,9 @@ pub fn config_dir() -> &'static PathBuf {
 pub fn support_dir() -> &'static PathBuf {
     static SUPPORT_DIR: OnceLock<PathBuf> = OnceLock::new();
     SUPPORT_DIR.get_or_init(|| {
+        if let Some(portable_dir) = portable_dir() {
+            return portable_dir.join("support");
+        }
         if cfg!(target_os = "macos") {
             return home_dir().join("Library/Application Support/Zed");
         }
@@ -64,6 +101,16 @@ pub fn support_dir() -> &'static PathBuf {
 pub fn temp_dir() -> &'static PathBuf {
     static TEMP_DIR: OnceLock<PathBuf> = OnceLock::new();
     TEMP_DIR.get_or_init(|| {
+        // Do we want the temp directory to be in the portable directory? It is
+        // conceptually clean in the sense that it makes the portable mode
+        // completely independent of the machine configuration. And if we run
+        // executables from the temp dir then this is useful for corporate
+        // environments where executables are not allowed to run from the user's
+        // home directory. However it might be surprising to the user that they
+        // are suddenly left with temporaries outside the global temp folder.
+        if let Some(portable_dir) = portable_dir() {
+            return portable_dir.join("temp");
+        }
         if cfg!(target_os = "macos") {
             return dirs::cache_dir()
                 .expect("failed to determine cachesDirectory directory")
@@ -93,6 +140,9 @@ pub fn temp_dir() -> &'static PathBuf {
 pub fn logs_dir() -> &'static PathBuf {
     static LOGS_DIR: OnceLock<PathBuf> = OnceLock::new();
     LOGS_DIR.get_or_init(|| {
+        if let Some(portable_dir) = portable_dir() {
+            return portable_dir.join("logs");
+        }
         if cfg!(target_os = "macos") {
             home_dir().join("Library/Logs/Zed")
         } else {
@@ -129,6 +179,9 @@ pub fn database_dir() -> &'static PathBuf {
 pub fn crashes_dir() -> &'static Option<PathBuf> {
     static CRASHES_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
     CRASHES_DIR.get_or_init(|| {
+        if let Some(portable_dir) = portable_dir() {
+            return Some(portable_dir.join("crashes"));
+        }
         cfg!(target_os = "macos").then_some(home_dir().join("Library/Logs/DiagnosticReports"))
     })
 }
